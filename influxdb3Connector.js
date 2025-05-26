@@ -55,6 +55,10 @@ let client; // wird erst in main() initialisiert
             die(`Ungültiges oder fehlendes 'measurement' für ${dp.id}`);
         if (dp.tagSource !== undefined && typeof dp.tagSource !== "string")
             die(`'tagSource' für ${dp.id} muss String sein.`);
+        // NEU ➟ minDelta ist optional, muss aber ≥ 0 sein
+        if (dp.minDelta !== undefined &&
+            (typeof dp.minDelta !== "number" || dp.minDelta <0))
+            die(`'minDelta' für ${dp.id} muss eine Zahl ≥ 0 sein.`);
     }
 
     // Erst NACH erfolgreicher Validierung starten
@@ -76,6 +80,7 @@ let flushDelay = BASE_FLUSH_MS;
 // Maps: letzter Wert & letzter erfolgreicher Write (ms)
 const lastValues = new Map();
 const lastWritten = new Map();
+const writtenValues = new Map(); // **neu**: zuletzt erfolgreich geschriebener numerischer Wert
 
 // Escape für Line‑Protocol
 const escapeLP = (s) => s.replace(/[ ,=]/g, "\\$&");
@@ -147,7 +152,10 @@ async function flushQueue() {
     try {
         await client.write(lines.join("\n"));
         const now = Date.now();
-        for (const { dp } of batch) lastWritten.set(dp.id, now);
+        for (const { dp, value } of batch) {
+            lastWritten.set(dp.id, now);
+            writtenValues.set(dp.id, value);
+        }
         flushDelay = BASE_FLUSH_MS;
     } catch (err) {
         console.error("Write-Error (Batch):", err.message);
@@ -179,7 +187,9 @@ async function writeToInflux(dp, rawVal, source, ts = Date.now() * 1e6) {
 
     try {
         await client.write(line);
-        lastWritten.set(dp.id, Date.now());
+        const now = Date.now();
+        lastWritten.set(dp.id, now);
+        writtenValues.set(dp.id, num);
     } catch (err) {
         console.error(`Write-Error ${dp.measurement} (${source}):`, err.message);
         enqueueValue(dp, num, source, ts);
@@ -214,6 +224,14 @@ async function main() {
                 tsNs = Date.now() * 1e6;
             }
             lastValues.set(dp.id, val);
+
+            // ➟ **minDelta-Prüfung** (falls konfiguriert)
+            if (dp.minDelta !== undefined) {
+                const last = writtenValues.get(dp.id);
+                if (last !== undefined && Math.abs(Number(val) - last) < dp.minDelta) {
+                    return; // Änderung zu klein  →  kein Write
+                }
+            }
             await writeToInflux(dp, val, "change", tsNs);
         });
 

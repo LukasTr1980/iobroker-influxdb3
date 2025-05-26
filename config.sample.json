@@ -8,7 +8,8 @@
         {
             "id": "ID1",
             "measurement": "AUSSENTEMP",
-            "tagSource": "IOBROKER"
+            "tagSource": "IOBROKER",
+            "minDelta": 0.1
         },
         {
             "id": "ID2",
