@@ -123,7 +123,7 @@ async function flushQueue() {
     for (const item of queue) {
         const { value, source, ts } = item;
         // Line Protocol: measurement,tag=wert field=value timestamp
-        const line = `${MEASUREMENT_NAME},quelle=${TAG_SOURCE} wert=${value} ${ts}`;
+        const line = `${MEASUREMENT_NAME},quelle=${TAG_SOURCE},trigger=${source} wert=${value} ${ts}`;
         try {
             await client.write(line);
         } catch (err) {
@@ -156,7 +156,7 @@ async function writeToInflux(value, source, ts = Date.now() * 1e6) {
         console.warn(`Ungültiger Wert (${value}) von '${source}'. Schreiben übersprungen.`);
         return;
     }
-    const line = `${MEASUREMENT_NAME},quelle=${TAG_SOURCE} wert=${value} ${ts}`;
+    const line = `${MEASUREMENT_NAME},quelle=${TAG_SOURCE},trigger=${source} wert=${value} ${ts}`;
     try {
         await client.write(line);
         console.log(`InfluxDB3 v3: Wert geschrieben (${source}):`, value);
@@ -186,7 +186,9 @@ setInterval(async () => {
             try {
                 const state = await getStateAsync(DATAPOINT_ID);
                 lastValue = state && state.val != null ? parseFloat(state.val) : undefined;
-            } catch {/* ignore */ }
+            } catch (err) {
+                console.warn(`Konnte stündlichen Wert für ${DATAPOINT_ID} nicht laden: ${err.message}`)
+            }
         }
         if (lastValue != null) {
             const ts = Date.now() * 1e6;
