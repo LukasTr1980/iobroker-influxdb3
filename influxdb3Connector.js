@@ -57,7 +57,7 @@ let client; // wird erst in main() initialisiert
             die(`'tagSource' für ${dp.id} muss String sein.`);
         // NEU ➟ minDelta ist optional, muss aber ≥ 0 sein
         if (dp.minDelta !== undefined &&
-            (typeof dp.minDelta !== "number" || dp.minDelta <0))
+            (typeof dp.minDelta !== "number" || dp.minDelta < 0))
             die(`'minDelta' für ${dp.id} muss eine Zahl ≥ 0 sein.`);
     }
 
@@ -227,9 +227,13 @@ async function main() {
 
             // ➟ **minDelta-Prüfung** (falls konfiguriert)
             if (dp.minDelta !== undefined) {
+                const currentNum = Number(val);
                 const last = writtenValues.get(dp.id);
-                if (last !== undefined && Math.abs(Number(val) - last) < dp.minDelta) {
-                    return; // Änderung zu klein  →  kein Write
+                if (Number.isFinite(currentNum) &&
+                    last !== undefined &&
+                    Math.abs(currentNum - last) < dp.minDelta) {
+                    console.log(`minDelta skip ${dp.id}: |${currentNum} - ${last}| < ${dp.minDelta}`);
+                    return;
                 }
             }
             await writeToInflux(dp, val, "change", tsNs);
