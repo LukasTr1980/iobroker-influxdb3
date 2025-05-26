@@ -1,38 +1,62 @@
+/**
+ * influxdb3_connector.js
+ * ----------------------
+ * Dieses Skript liest Temperaturwerte aus ioBroker aus und schreibt sie in eine InfluxDB 3.x.
+ * Es unterstützt Direktschreibungen bei Wertänderungen, stündliche Schreibungen sowie eine Fehler-Queue zum Wiederholen
+ * fehlgeschlagener Schreibversuche.
+ *
+ * Voraussetzungen:
+ * - @influxdata/influxdb3-client installiert
+ * - ioBroker-Umgebung mit Zugriff auf Konstanten wie on() und getStateAsync()
+ * - config.json im CONFIG_PATH mit Feldern: influx.host, influx.token, influx.database
+ *
+ * Funktionsübersicht:
+ * - Konfiguration laden und validieren
+ * - InfluxDB-Client initialisieren
+ * - Fehler-Queue verwalten (Datei-basiert)
+ * - „Flush“ der Queue beim Start und alle 60 Sekunden
+ * - Direktes Schreiben bei Wertänderungen
+ * - Stündliches Schreiben einer aktuellen Messung
+ * - Initial-Log beim Start
+ */
+
 const { InfluxDBClient } = require('@influxdata/influxdb3-client');
 const fs = require('fs');
 
+// Pfad zur Konfigurationsdatei
 const CONFIG_PATH = '/opt/iobroker/influxdb3_connector/config.json';
 
 let cfg;
 try {
+    // Konfigurationsdaten aus JSON-Datei einlesen
     cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 } catch (e) {
     console.error('Konnte config.json nicht laden:', e.message);
     process.exit(1);
 }
 
-// --- Konfiguration ---
+// --- Konfiguration der InfluxDB-Verbindung ---
 const INFLUX_HOST = cfg.influx.host;
 const INFLUX_TOKEN = cfg.influx.token;
 const INFLUX_DATABASE = cfg.influx.database;
 
-// Datenpunkt- und Measurement-Konstanten
+// Konstanten für Datapoint-ID, Measurement-Name und Tag-Quelle
 const DATAPOINT_ID = 'javascript.0.Wetterstation.Aussentemperatur';
 const MEASUREMENT_NAME = 'Aussentemperatur';
 const TAG_SOURCE = 'iobroker';
 
-// --- InfluxDB-Client ---
+// --- InfluxDB-Client initialisieren ---
 const client = new InfluxDBClient({
     host: INFLUX_HOST,
     token: INFLUX_TOKEN,
     database: INFLUX_DATABASE
 });
 
-// --- Fehler-Queue ---
+// --- Fehler-Queue: Pfad und Initialisierung ---
 const QUEUE_FILE = '/opt/iobroker/influxdb3_connector/influxdb3_queue.json';
 let queue = [];
 
-// Sicherstellen, dass die Queue-Datei existiert (wenn nicht, neu anlegen)
+// Stelle sicher, dass die Queue-Datei existiert, sonst anlegen
 try {
     if (!fs.existsSync(QUEUE_FILE)) {
         fs.writeFileSync(QUEUE_FILE, '[]', 'utf8');
@@ -42,7 +66,7 @@ try {
     console.error('Fehler beim Anlegen der Queue-Datei:', e.message);
 }
 
-// Lade bestehende Queue
+// Lade vorhandene Queue aus Datei
 try {
     const raw = fs.readFileSync(QUEUE_FILE, 'utf8');
     queue = raw ? JSON.parse(raw) : [];
@@ -51,6 +75,9 @@ try {
     queue = [];
 }
 
+/**
+ * Speichert die aktuelle Queue in die Datei
+ */
 function saveQueue() {
     try {
         fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue), 'utf8');
@@ -59,12 +86,22 @@ function saveQueue() {
     }
 }
 
+/**
+ * Fügt einen fehlgeschlagenen Schreibversuch in die Queue ein und speichert sie
+ * @param {number} value  Der zu schreibende Messwert
+ * @param {string} source Kennzeichnung der Quelle (z.B. 'change' oder 'hourly')
+ * @param {number} ts    Nanosekunden-Timestamp für den Eintrag
+ */
 function enqueueValue(value, source, ts) {
     queue.push({ value, source, ts });
     saveQueue();
 }
 
 let isFlushing = false;
+/**
+ * Versucht, alle Einträge in der Queue in InfluxDB zu schreiben.
+ * Bei Fehlern bleiben Einträge erhalten und werden später erneut versucht.
+ */
 async function flushQueue() {
     if (isFlushing || queue.length === 0) return;
     isFlushing = true;
@@ -72,6 +109,7 @@ async function flushQueue() {
     const remaining = [];
     for (const item of queue) {
         const { value, source, ts } = item;
+        // Line Protocol: measurement,tag=wert field=value timestamp
         const line = `${MEASUREMENT_NAME},quelle=${TAG_SOURCE} wert=${value} ${ts}`;
         try {
             await client.write(line);
@@ -86,7 +124,7 @@ async function flushQueue() {
     isFlushing = false;
 }
 
-// Initial und periodisch retry
+// Initialer Versuch und danach alle 60 Sekunden
 flushQueue().catch(err => console.error('Initiales flushQueue fehlgeschlagen:', err.message));
 setInterval(flushQueue, 60 * 1000);
 
@@ -94,10 +132,11 @@ setInterval(flushQueue, 60 * 1000);
 let lastValue;
 
 /**
- * Schreibt einen Wert in InfluxDB und enqueuet bei Fehler
- * @param {number} value  gemessener Wert
- * @param {string} source Quelle für Tag
- * @param {number} [ts]   Nanosekunden-Timestamp
+ * Schreibt einen Wert direkt in InfluxDB.
+ * Bei Fehlern wird der Eintrag in die Queue übernommen.
+ * @param {number} value  Gemessener Wert
+ * @param {string} source Quelle für Tag (z.B. 'change', 'hourly')
+ * @param {number} [ts]   Nanosekunden-Timestamp (Default: aktueller Zeitstempel)
  */
 async function writeToInflux(value, source, ts = Date.now() * 1e6) {
     if (value === undefined || value === null || isNaN(value)) {
@@ -114,20 +153,22 @@ async function writeToInflux(value, source, ts = Date.now() * 1e6) {
     }
 }
 
-// 1) Echte Wertänderung abonnieren
+// 1) Direktes Schreiben: abonnieren bei Zustandänderungen
 on({ id: DATAPOINT_ID, change: 'ne', ack: true }, async obj => {
     const value = parseFloat(obj.state.val);
     lastValue = value;
+    // Erzeuge Timestamp aus last change (lc) oder aktuellem Zeitpunkt
     const ts = obj.state.lc ? Math.floor(new Date(obj.state.lc).getTime() * 1e6) : Date.now() * 1e6;
     await writeToInflux(value, 'change', ts);
 });
 
-// 2) Stundenweises Schreiben: prüfen jede Minute, ob Stunde gewechselt
+// 2) Stündliches Schreiben: jede Minute prüfen, ob die Stunde gewechselt hat
 let lastHourWritten = new Date().getHours();
 setInterval(async () => {
     const now = new Date();
     if (now.getMinutes() === 0 && now.getHours() !== lastHourWritten) {
         lastHourWritten = now.getHours();
+        // Falls noch kein Wert vorliegt, versuche ihn aus ioBroker zu laden
         if (lastValue === undefined) {
             try {
                 const state = await getStateAsync(DATAPOINT_ID);
@@ -141,7 +182,7 @@ setInterval(async () => {
     }
 }, 60 * 1000);
 
-// 3) Initial-Log
+// 3) Initial-Log: lade letzten Wert beim Start
 (async () => {
     console.log('InfluxDB3 Skript gestartet. Überwacht:', DATAPOINT_ID);
     if (lastValue === undefined) {
