@@ -1,0 +1,19 @@
+{
+    "influx": {
+        "host": "INFLUXDB3_ADDRESS",
+        "token": "YOUR_TOKEN",
+        "database": "YOUR_DB_NAME"
+    },
+    "datapoints": [
+        {
+            "id": "ID1",
+            "measurement": "AUSSENTEMP",
+            "tagSource": "IOBROKER"
+        },
+        {
+            "id": "ID2",
+            "measurement": "REGENTAG",
+            "tagSource": "IOBROKER"
+        }
+    ]
+}

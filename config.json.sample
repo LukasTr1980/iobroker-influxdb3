@@ -1,7 +1,0 @@
-{
-    "influx": {
-        "host": "INFLUXDB3_ADDRESS",
-        "token": "YOUR_TOKEN",
-        "database": "YOUR_DB_NAME"
-    }
-}
