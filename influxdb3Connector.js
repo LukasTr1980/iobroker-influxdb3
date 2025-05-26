@@ -16,7 +16,7 @@
  *     ]
  *
  * Funktionsübersicht:
- * - Konfiguration laden und validieren
+ * - Konfiguration laden und validieren (inkl. detaillierter Prüfung jedes Datenpunkts)
  * - InfluxDB-Client initialisieren
  * - Verzeichnis und Fehler-Queue verwalten
  * - Direktes Schreiben bei Wertänderungen für jeden Datenpunkt
@@ -40,14 +40,30 @@ try {
     process.exit(1);
 }
 
-// Validierung
-if (!cfg.influx || !cfg.influx.host || !cfg.influx.token || !cfg.influx.database) {
-    console.error('Influx-Konfiguration unvollständig in config.json');
+// Validierung der Influx-Einstellungen
+if (!cfg.influx || typeof cfg.influx.host !== 'string' || typeof cfg.influx.token !== 'string' || typeof cfg.influx.database !== 'string') {
+    console.error('Influx-Konfiguration unvollständig oder fehlerhaft in config.json');
     process.exit(1);
 }
+
+// Validierung und Detailprüfung der datapoints
 if (!Array.isArray(cfg.datapoints) || cfg.datapoints.length === 0) {
     console.error('Keine Datenpunkte in config.json definiert');
     process.exit(1);
+}
+for (const dp of cfg.datapoints) {
+    if (!dp.id || typeof dp.id !== 'string') {
+        console.error(`Ungültiger oder fehlender 'id' für einen Datenpunkt: ${JSON.stringify(dp)}`);
+        process.exit(1);
+    }
+    if (!dp.measurement || typeof dp.measurement !== 'string') {
+        console.error(`Ungültiges oder fehlendes 'measurement' für Datenpunkt '${dp.id}': ${JSON.stringify(dp)}`);
+        process.exit(1);
+    }
+    if (dp.tagSource !== undefined && typeof dp.tagSource !== 'string') {
+        console.error(`Ungültiger 'tagSource' für Datenpunkt '${dp.id}': Muss ein String sein.`);
+        process.exit(1);
+    }
 }
 
 // --- InfluxDB-Client ---
@@ -85,7 +101,7 @@ function saveQueue() {
         fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue), 'utf8');
     } catch (e) {
         console.error('Fehler beim Speichern der Queue:', e.message);
-        // optional: process.exit(1);
+        // Optional: process.exit(1);
     }
 }
 
@@ -119,22 +135,24 @@ async function flushQueue() {
     isFlushing = false;
 }
 
-// Periodisches Flush alle 60s und initial
+// Initial und periodisch (60s)
 flushQueue().catch(err => console.error('Initiales flushQueue fehlgeschlagen:', err.message));
 setInterval(flushQueue, 60 * 1000);
 
-// --- Tracking pro Datenpunkt ---
-const lastValues = new Map(); // dp -> lastValue
+// --- Tracking und Logging ---
+// Map mit Schlüssel dp.id und Wert zuletzt gemessener Wert
+const lastValues = new Map();
 
 async function writeToInflux(dp, value, source, ts = Date.now() * 1e6) {
-    const { measurement, tagSource } = dp;
+    const { id, measurement, tagSource } = dp;
     const tag = tagSource || 'iobroker';
+
     if (value == null || isNaN(value)) {
         console.warn(`Ungültiger Wert (${value}) für ${measurement}. Übersprungen.`);
         return;
     }
-    const line = `${measurement},quelle=${tag},trigger=${source} wert=${value} ${ts}`;
 
+    const line = `${measurement},quelle=${tag},trigger=${source} wert=${value} ${ts}`;
     try {
         await client.write(line);
         console.log(`Geschrieben ${measurement} (${source}):`, value);
@@ -144,25 +162,24 @@ async function writeToInflux(dp, value, source, ts = Date.now() * 1e6) {
     }
 }
 
-// Einrichtung der Listener und des stündlichen Schreibens
+// Setup: Listener für Änderungen und Initial-Laden
 for (const dp of cfg.datapoints) {
-    // 1) Listener für Änderungen
     on({ id: dp.id, change: 'ne', ack: true }, async obj => {
         const val = parseFloat(obj.state.val);
-        lastValues.set(dp, val);
+        lastValues.set(dp.id, val);
         const ts = obj.state.lc
             ? Math.floor(new Date(obj.state.lc).getTime() * 1e6)
             : Date.now() * 1e6;
         await writeToInflux(dp, val, 'change', ts);
     });
 
-    // 2) Initial-Laden des letzten Werts
+    // Initial laden
     (async () => {
         try {
             const state = await getStateAsync(dp.id);
             if (state?.val != null) {
                 const v = parseFloat(state.val);
-                lastValues.set(dp, v);
+                lastValues.set(dp.id, v);
                 console.log(`Initial geladen ${dp.measurement}:`, v);
             }
         } catch (e) {
@@ -178,12 +195,12 @@ setInterval(async () => {
     if (now.getUTCMinutes() === 0 && now.getUTCHours() !== lastHourUTC) {
         lastHourUTC = now.getUTCHours();
         for (const dp of cfg.datapoints) {
-            let val = lastValues.get(dp);
+            let val = lastValues.get(dp.id);
             if (val == null) {
                 try {
                     const st = await getStateAsync(dp.id);
                     val = st?.val != null ? parseFloat(st.val) : undefined;
-                    lastValues.set(dp, val);
+                    lastValues.set(dp.id, val);
                 } catch (e) {
                     console.warn(`Stündlich: Lesen fehlgeschlagen ${dp.measurement}:`, e.message);
                 }
