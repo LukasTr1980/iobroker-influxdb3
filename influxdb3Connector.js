@@ -103,7 +103,7 @@ function saveQueue() {
  * Fügt einen fehlgeschlagenen Schreibversuch in die Queue ein und speichert sie
  * @param {number} value  Der zu schreibende Messwert
  * @param {string} source Kennzeichnung der Quelle (z.B. 'change' oder 'hourly')
- * @param {number} ts    Nanosekunden-Timestamp für den Eintrag
+ * @param {number} ts    UTC Unix-Zeitstempel in Nanosekunden
  */
 function enqueueValue(value, source, ts) {
     queue.push({ value, source, ts });
@@ -149,7 +149,7 @@ let lastValue;
  * Bei Fehlern wird der Eintrag in die Queue übernommen.
  * @param {number} value  Gemessener Wert
  * @param {string} source Quelle für Tag (z.B. 'change', 'hourly')
- * @param {number} [ts]   Nanosekunden-Timestamp (Default: aktueller Zeitstempel)
+ * @param {number} [ts]   UTC Unix-Zeitstempel in Nanosekunden (Default: aktueller Zeitpunkt)
  */
 async function writeToInflux(value, source, ts = Date.now() * 1e6) {
     if (value === undefined || value === null || isNaN(value)) {
@@ -170,17 +170,17 @@ async function writeToInflux(value, source, ts = Date.now() * 1e6) {
 on({ id: DATAPOINT_ID, change: 'ne', ack: true }, async obj => {
     const value = parseFloat(obj.state.val);
     lastValue = value;
-    // Erzeuge Timestamp aus last change (lc) oder aktuellem Zeitpunkt
+    // Erzeuge UTC Timestamp: lc ist ISO-String in UTC, Date.getTime liefert MS seit Epoch UTC
     const ts = obj.state.lc ? Math.floor(new Date(obj.state.lc).getTime() * 1e6) : Date.now() * 1e6;
     await writeToInflux(value, 'change', ts);
 });
 
 // 2) Stündliches Schreiben: jede Minute prüfen, ob die Stunde gewechselt hat
-let lastHourWritten = new Date().getHours();
+let lastHourWritten = new Date().getUTCHours();
 setInterval(async () => {
     const now = new Date();
-    if (now.getMinutes() === 0 && now.getHours() !== lastHourWritten) {
-        lastHourWritten = now.getHours();
+    if (now.getUTCMinutes() === 0 && now.getUTCHours() !== lastHourWritten) {
+        lastHourWritten = now.getUTCHours();
         // Falls noch kein Wert vorliegt, versuche ihn aus ioBroker zu laden
         if (lastValue === undefined) {
             try {
