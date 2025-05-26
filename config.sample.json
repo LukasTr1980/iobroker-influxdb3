@@ -1,6 +1,6 @@
 {
     "influx": {
-        "host": "INFLUXDB3_ADDRESS",
+        "host": "INFLUXDB3_ADDRESS:PORT",
         "token": "YOUR_TOKEN",
         "database": "YOUR_DB_NAME"
     },

@@ -16,6 +16,7 @@
 const { InfluxDBClient } = require("@influxdata/influxdb3-client");
 const fs = require("fs").promises;
 const path = require("path");
+const process = require("process");
 
 // --------------------------------------------------
 // Konfiguration laden (async IIFE) und danach main()
@@ -246,6 +247,9 @@ async function main() {
                 if (st?.val !== undefined) {
                     lastValues.set(dp.id, st.val);
                     console.log(`Initial geladen ${dp.measurement}:`, st.val);
+
+                    // ➟ Sofort in Influx schreiben, OHNE minDelta-Check
+                    await writeToInflux(dp, st.val, "startup-initial");
                 }
             } catch (e) {
                 console.warn(`Initial-Lesen fehlgeschlagen für ${dp.id}:`, e.message);
