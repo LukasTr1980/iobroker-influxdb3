@@ -3,7 +3,7 @@
  * ----------------------
  * Dieses Skript liest Temperaturwerte aus ioBroker aus und schreibt sie in eine InfluxDB 3.x.
  * Es unterstützt Direktschreibungen bei Wertänderungen, stündliche Schreibungen sowie eine Fehler-Queue zum Wiederholen
- * fehlgeschlagener Schreibversuche.
+ * fehlgeschlagener Schreibversuche. Zusätzlich wird sichergestellt, dass der benötigte Ordner und die Queue-Datei existieren.
  *
  * Voraussetzungen:
  * - @influxdata/influxdb3-client installiert
@@ -13,7 +13,7 @@
  * Funktionsübersicht:
  * - Konfiguration laden und validieren
  * - InfluxDB-Client initialisieren
- * - Fehler-Queue verwalten (Datei-basiert)
+ * - Verzeichnis und Fehler-Queue verwalten (Dateibasiert)
  * - „Flush“ der Queue beim Start und alle 60 Sekunden
  * - Direktes Schreiben bei Wertänderungen
  * - Stündliches Schreiben einer aktuellen Messung
@@ -22,6 +22,7 @@
 
 const { InfluxDBClient } = require('@influxdata/influxdb3-client');
 const fs = require('fs');
+const path = require('path');
 
 // Pfad zur Konfigurationsdatei
 const CONFIG_PATH = '/opt/iobroker/influxdb3_connector/config.json';
@@ -52,11 +53,23 @@ const client = new InfluxDBClient({
     database: INFLUX_DATABASE
 });
 
-// --- Fehler-Queue: Pfad und Initialisierung ---
-const QUEUE_FILE = '/opt/iobroker/influxdb3_connector/influxdb3_queue.json';
+// --- Verzeichnis und Fehler-Queue: Pfad und Initialisierung ---
+const QUEUE_DIR = '/opt/iobroker/influxdb3_connector';
+const QUEUE_FILE = path.join(QUEUE_DIR, 'influxdb3_queue.json');
 let queue = [];
 
-// Stelle sicher, dass die Queue-Datei existiert, sonst anlegen
+// Sicherstellen, dass das Verzeichnis existiert, sonst anlegen
+try {
+    if (!fs.existsSync(QUEUE_DIR)) {
+        fs.mkdirSync(QUEUE_DIR, { recursive: true });
+        console.log('Verzeichnis angelegt:', QUEUE_DIR);
+    }
+} catch (e) {
+    console.error('Fehler beim Anlegen des Verzeichnisses:', e.message);
+    process.exit(1);
+}
+
+// Sicherstellen, dass die Queue-Datei existiert, sonst anlegen
 try {
     if (!fs.existsSync(QUEUE_FILE)) {
         fs.writeFileSync(QUEUE_FILE, '[]', 'utf8');
