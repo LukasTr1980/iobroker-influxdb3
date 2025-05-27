@@ -79,6 +79,19 @@ const BASE_FLUSH_MS = 60_000;
 const MAX_FLUSH_MS = 600_000; // 10 Minuten
 let flushDelay = BASE_FLUSH_MS;
 
+// ---------- Fehler-Logger -------------------------------------------------
+function formatInfluxError(err) {
+    const code   = err.code ?? err.statusCode ?? err.cause?.code   ?? "";
+    const msg    = err.message ?? err.cause?.message ?? "";
+    // InfluxDB v3 liefert oft ein JSON-Body mit Details
+    const body   = typeof err.body === "object" ? JSON.stringify(err.body) : err.body ?? "";
+    return `Code:${code || "-"}  Msg:${msg || "-"}  Body:${body || "-"}`;
+}
+
+function logInfluxError(context, err) {
+    console.error(`${context}  ${formatInfluxError(err)}\nStack:`, err.stack);
+}
+
 // Maps: letzter Wert & letzter erfolgreicher Write (ms)
 const lastValues = new Map();
 const lastWritten = new Map();
@@ -160,7 +173,7 @@ async function flushQueue() {
         }
         flushDelay = BASE_FLUSH_MS;
     } catch (err) {
-        console.error("Write-Error (Batch):", err.message);
+        logInfluxError("Write-Error (Batch)", err);
         queue.unshift(...batch);
         flushDelay = Math.min(flushDelay * 2, MAX_FLUSH_MS);
     }
@@ -193,8 +206,7 @@ async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
         lastWritten.set(dp.id, now);
         writtenValues.set(dp.id, num);
     } catch (err) {
-        console.error(`Write-Error ${dp.measurement} (${source}): ${err.statusCode || ''
-            } ${err.message || ''}\n`, err.stack);
+        logInfluxError(`Write-Error ${dp.measurement} (${source}):`, err);
         enqueueValue(dp, num, source, ts);
     }
 }
