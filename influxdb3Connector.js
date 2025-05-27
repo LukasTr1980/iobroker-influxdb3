@@ -71,6 +71,7 @@ let client; // wird erst in main() initialisiert
 // --------------------------------------------------
 const QUEUE_DIR = path.dirname(CONFIG_PATH);
 const QUEUE_FILE = path.join(QUEUE_DIR, "influxdb3_queue.json");
+const msToNs = (ms) => (BigInt(ms) * 1_000_000n).toString(); // ms → ns (BigInt für große Zahlen)
 let queue = [];
 
 const MAX_BATCH = 500;
@@ -175,7 +176,7 @@ function scheduleNextFlush() {
 // --------------------------------------------------
 // Schreiben einzelner Werte (mit Typ‑Check & Escaping)
 // --------------------------------------------------
-async function writeToInflux(dp, rawVal, source, ts = Date.now() * 1e6) {
+async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
     const num = Number(rawVal);
     if (!Number.isFinite(num)) {
         console.warn(`Ungültiger Wert (${rawVal}) für ${dp.measurement}`);
@@ -217,14 +218,11 @@ async function main() {
         on({ id: dp.id, change: "ne", ack: true }, async (obj) => {
             const val = obj?.state?.val;
             const lc = obj?.state?.lc;
-            let tsNs;
-            if (typeof lc === "number" && Number.isFinite(lc)) {
-                tsNs = lc * 1e6; // ms → ns
-            } else if (typeof lc === "string") {
-                tsNs = Date.parse(lc) * 1e6; // ISO‑String
-            } else {
-                tsNs = Date.now() * 1e6;
-            }
+            const tsNs = typeof lc === "number" && Number.isFinite(lc)
+                ? msToNs(lc) // lc als ms-Zahl
+                : typeof lc === "string"
+                    ? msToNs(Date.parse(lc)) // lc als ISO-String
+                    : msToNs(Date.now()); // Fallback auf jetzt
             lastValues.set(dp.id, val);
 
             // ➟ **minDelta-Prüfung** (falls konfiguriert)
