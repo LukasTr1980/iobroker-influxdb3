@@ -192,7 +192,8 @@ async function writeToInflux(dp, rawVal, source, ts = Date.now() * 1e6) {
         lastWritten.set(dp.id, now);
         writtenValues.set(dp.id, num);
     } catch (err) {
-        console.error(`Write-Error ${dp.measurement} (${source}):`, err.message);
+        console.error(`Write-Error ${dp.measurement} (${source}): ${err.statusCode || ''
+            } ${err.message || ''}\n`, err.stack);
         enqueueValue(dp, num, source, ts);
     }
 }
