@@ -159,7 +159,7 @@ async function flushQueue() {
     const batch = queue.splice(0, MAX_BATCH);
     const lines = batch.map(({ dp, value, source, ts }) => {
         const meas = escapeLP(dp.measurement);
-        const tag = escapeLP(dp.tagSource || "iobroker");
+        const tag = escapeLP(dp.tagSource || "iobroker_raspi");
         const trig = escapeLP(source);
         return `${meas},quelle=${tag},trigger=${trig} wert=${value} ${ts}`;
     });
@@ -196,7 +196,7 @@ async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
         return;
     }
     const meas = escapeLP(dp.measurement);
-    const tag = escapeLP(dp.tagSource || "iobroker");
+    const tag = escapeLP(dp.tagSource || "iobroker_raspi");
     const trig = escapeLP(source);
     const line = `${meas},quelle=${tag},trigger=${trig} wert=${num} ${ts}`;
 
