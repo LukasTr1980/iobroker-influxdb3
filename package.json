@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@influxdata/influxdb3-client": "^1.1.0",
-    "csv-parse": "^5.6.0",
     "dotenv": "^16.5.0"
   }
 }
