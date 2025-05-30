@@ -1,2 +1,5 @@
 config.json
 *.http
+*.csv
+.lp
+node_modules/
