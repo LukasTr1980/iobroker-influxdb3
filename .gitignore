@@ -3,3 +3,4 @@ config.json
 *.csv
 *.lp
 node_modules/
+.env
