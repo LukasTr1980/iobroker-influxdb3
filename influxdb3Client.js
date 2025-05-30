@@ -3,7 +3,7 @@ require('dotenv').config();           // ← .env laden
 
 const fs = require('fs');
 const path = require('path');
-const { InfluxDB3Client } = require('@influxdata/influxdb3-client');
+const { InfluxDBClient } = require('@influxdata/influxdb3-client');
 
 /* ----------  Mini-CLI-Parser  ------------------------------------------ */
 function getOpts(argv) {
@@ -46,7 +46,7 @@ if (!fs.existsSync(filePath)) {
 }
 
 /* ----------  Client-Init  --------------------------------------------- */
-const client = new InfluxDB3Client({
+const client = new InfluxDBClient({
     host: opts.host,
     token: opts.token,
     database: opts.database,
