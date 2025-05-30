@@ -1,41 +1,37 @@
 #!/usr/bin/env node
-require('dotenv').config();           // ← .env laden
+require('dotenv').config();
 
 const fs = require('fs');
+const zlib = require('zlib');
 const path = require('path');
+const readline = require('readline');
 const { InfluxDBClient } = require('@influxdata/influxdb3-client');
 
-/* ----------  Mini-CLI-Parser  ------------------------------------------ */
+/* ---------- CLI-Parser ------------------------------------------------ */
 function getOpts(argv) {
-    const opts = {
-        lpFile: 'export.lp',           // default
+    const o = {
+        lpFile: 'export.lp',
         host: process.env.INFLUXDB3_HOST,
         database: process.env.INFLUXDB3_DATABASE,
         token: process.env.INFLUXDB3_TOKEN,
         stream: false,
     };
-
-    argv.slice(2).forEach(arg => {
-        if (arg === '--stream') opts.stream = true;
-        else if (arg.startsWith('--host=')) opts.host = arg.split('=')[1];
-        else if (arg.startsWith('--db=')) opts.database = arg.split('=')[1];
-        else if (arg.startsWith('--token=')) opts.token = arg.split('=')[1];
-        else if (!opts._fileSet) { opts.lpFile = arg; opts._fileSet = true; }
-        else console.warn(`⚠️  Extra Argument ignoriert: ${arg}`);
+    argv.slice(2).forEach(a => {
+        if (a === '--stream') o.stream = true;
+        else if (a.startsWith('--host=')) o.host = a.split('=')[1];
+        else if (a.startsWith('--db=')) o.database = a.split('=')[1];
+        else if (a.startsWith('--token=')) o.token = a.split('=')[1];
+        else if (!o.fileSet) { o.lpFile = a; o.fileSet = true; }
+        else console.warn(`⚠️  Extra-Argument ignoriert: ${a}`);
     });
-    return opts;
+    return o;
 }
 
 const opts = getOpts(process.argv);
-/* ----------------------------------------------------------------------- */
 
-/* ----------  Grund-Checks  -------------------------------------------- */
+/* ---------- Grundchecks ---------------------------------------------- */
 if (!opts.host || !opts.token || !opts.database) {
-    console.error(
-        '❌  Fehlende Influx-ENV-Variablen!\n' +
-        '    Benötigt: INFLUXDB3_HOST, INFLUXDB3_TOKEN, INFLUXDB3_DATABASE\n' +
-        '    (oder per --host= --token= --db= übergeben)'
-    );
+    console.error('❌  ENV fehlend: INFLUXDB3_HOST, _TOKEN, _DATABASE (oder via --host/--db/--token).');
     process.exit(1);
 }
 
@@ -45,34 +41,32 @@ if (!fs.existsSync(filePath)) {
     process.exit(1);
 }
 
-/* ----------  Client-Init  --------------------------------------------- */
+/* ---------- Client-Init ---------------------------------------------- */
 const client = new InfluxDBClient({
     host: opts.host,
     token: opts.token,
     database: opts.database,
 });
 
-/* ----------  Import-Routine  ------------------------------------------ */
+/* ---------- Import ---------------------------------------------------- */
 (async () => {
-    console.log(
-        `Importiere '${path.basename(filePath)}' → DB '${opts.database}' @ ${opts.host}` +
-        (opts.stream ? ' (Streaming-Modus)' : '')
-    );
+    console.log(`→ Import '${path.basename(filePath)}' nach '${opts.database}' @ ${opts.host}` +
+        (opts.stream ? ' (Stream)' : ''));
 
     try {
         if (opts.stream) {
-            /* -------- Variante B – Stream & Batch -------------------------- */
-            const CHUNK = 1000;              // Zeilen pro Batch-Write
+            const CHUNK = 1_000;
             let buffer = [];
             let written = 0;
 
-            const lineReader = require('readline').createInterface({
-                input: fs.createReadStream(filePath, { encoding: 'utf8' }),
-                crlfDelay: Infinity,
-            });
+            const inputStream = filePath.endsWith('.gz')
+                ? fs.createReadStream(filePath).pipe(zlib.createGunzip())
+                : fs.createReadStream(filePath);
 
-            for await (const line of lineReader) {
-                if (!line.trim()) continue;      // skip leer
+            const rl = readline.createInterface({ input: inputStream, crlfDelay: Infinity });
+
+            for await (const line of rl) {
+                if (!line.trim()) continue;
                 buffer.push(line);
                 if (buffer.length === CHUNK) {
                     await client.write(buffer.join('\n'));
@@ -84,24 +78,28 @@ const client = new InfluxDBClient({
                 await client.write(buffer.join('\n'));
                 written += buffer.length;
             }
-            console.log(`✅  ${written} Zeilen importiert (Streaming)`);
+            console.log(`✅  ${written} Zeilen importiert (Stream)`);
 
         } else {
-            /* -------- Variante A – Sync Read -------------------------------- */
-            const lp = fs.readFileSync(filePath, 'utf8');
-            if (!lp.trim()) {
+            const raw = filePath.endsWith('.gz')
+                ? zlib.gunzipSync(fs.readFileSync(filePath)).toString('utf8')
+                : fs.readFileSync(filePath, 'utf8');
+
+            if (!raw.trim()) {
                 console.log('ℹ️  Datei ist leer – nichts zu importieren.');
                 process.exit(0);
             }
-            await client.write(lp);
-            console.log('✅  Import fertig (Sync) –', lp.split('\n').filter(Boolean).length, 'Zeilen');
+            await client.write(raw);
+            console.log(`✅  Import fertig (Sync) – ${raw.split('\n').filter(Boolean).length} Zeilen`);
         }
 
+        await client.close?.();
         process.exit(0);
 
     } catch (err) {
         console.error('❌  Write-Fehler:', err.message || err);
-        if (err.body) console.error('Influx-Response:', JSON.stringify(err.body));
+        if (err.body) console.error('Influx-Antwort:', JSON.stringify(err.body));
+        await client.close?.();
         process.exit(1);
     }
 })();
