@@ -60,9 +60,10 @@ rows.forEach(r => {
     const ts = Date.parse(r._time);
     if (Number.isNaN(ts)) return;
 
+    const meas = r._measurement.split('.').pop();
     const fieldName = useDynamicField ? r._field || 'wert' : 'wert';
     out.push(
-        `${r._measurement},quelle=influxdbv2,trigger=manual_import ${fieldName}=${r._value} ${ts * 1e6}`
+        `${meas},quelle=influxdbv2,trigger=manual_import ${fieldName}=${r._value} ${ts * 1e6}`
     );
 });
 
