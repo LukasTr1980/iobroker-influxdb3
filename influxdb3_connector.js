@@ -50,7 +50,6 @@ let client; // wird erst in main() initialisiert
         die("Keine Datenpunkte in config.json definiert");
 
     for (const dp of cfg.datapoints) {
-        if (!dp.id && dp.iobroker_id) dp.id = dp.iobroker_id;
         if (!dp.id || typeof dp.id !== "string")
             die(`Ungültiger oder fehlender 'id': ${JSON.stringify(dp)}`);
         if (!dp.measurement || typeof dp.measurement !== "string")
