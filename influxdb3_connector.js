@@ -108,6 +108,7 @@ function buildTagString(dp, trigger) {
 const lastValues = new Map();
 const lastWritten = new Map();
 const writtenValues = new Map(); // **neu**: zuletzt erfolgreich geschriebener numerischer Wert
+const lastGuardRun = new Map(); // **neu**: letzter Guard-Check-Zeitpunkt pro Datenpunkt
 
 // Escape für Line‑Protocol
 const escapeLP = (s) => s.replace(/[ ,=]/g, "\\$&");
@@ -290,22 +291,38 @@ async function main() {
 
     // Smart Hourly Guard
     const ONE_HOUR = 60 * 60 * 1000;
+
     setInterval(async () => {
         const now = Date.now();
         for (const dp of cfg.datapoints) {
-            const last = lastWritten.get(dp.id) || 0;
-            if (now - last >= ONE_HOUR) {
-                let val = lastValues.get(dp.id);
-                if (val === undefined) {
-                    try {
-                        const st = await getStateAsync(dp.id);
-                        val = st?.val;
-                        lastValues.set(dp.id, val);
-                    } catch (e) {
-                        console.warn(`Hourly‑Guard Lesen fehlgeschlagen ${dp.id}:`, e.message);
-                    }
+            const lastGuardExecution = lastGuardRun.get(dp.id) || 0;
+            if (now - lastGuardExecution < ONE_HOUR) {
+                continue;
+            }
+            lastGuardRun.set(dp.id, now);
+
+            const lastSuccessfulWrite = lastWritten.get(dp.id) || 0;
+            if (now - lastSuccessfulWrite < ONE_HOUR) {
+                continue;
+            }
+
+            let val = lastValues.get(dp.id);
+            if (val === undefined) {
+                try {
+                    const st = await getStateAsync(dp.id);
+                    val = st?.val;
+                    lastValues.set(dp.id, val);
+                } catch (e) {
+                    console.warn(`Hourly Guard Lesen fehlgeschlagen für ${dp.id}:`, e.message);
+                    continue;
                 }
-                if (val !== undefined) await writeToInflux(dp, val, "hourly-guard");
+            }
+
+            if (val !== undefined) {
+                console.log(`Hourly Guard: Schreibe Wert für ${dp.id} (${val}), da >1h seit letztem erfolgreichem Write`);
+                await writeToInflux(dp, val, "hourly-guard");
+            } else {
+                console.warn(`Hourly Guard: Konnte keinen Wert für ${dp.id} finden, überspringe Write.`);
             }
         }
     }, 60_000);
