@@ -50,6 +50,7 @@ let client; // wird erst in main() initialisiert
         die("Keine Datenpunkte in config.json definiert");
 
     for (const dp of cfg.datapoints) {
+        if (!dp.id && dp.iobroker_id) dp.id = dp.iobroker_id;
         if (!dp.id || typeof dp.id !== "string")
             die(`Ungültiger oder fehlender 'id': ${JSON.stringify(dp)}`);
         if (!dp.measurement || typeof dp.measurement !== "string")
@@ -81,15 +82,27 @@ let flushDelay = BASE_FLUSH_MS;
 
 // ---------- Fehler-Logger -------------------------------------------------
 function formatInfluxError(err) {
-    const code   = err.code ?? err.statusCode ?? err.cause?.code   ?? "";
-    const msg    = err.message ?? err.cause?.message ?? "";
+    const code = err.code ?? err.statusCode ?? err.cause?.code ?? "";
+    const msg = err.message ?? err.cause?.message ?? "";
     // InfluxDB v3 liefert oft ein JSON-Body mit Details
-    const body   = typeof err.body === "object" ? JSON.stringify(err.body) : err.body ?? "";
+    const body = typeof err.body === "object" ? JSON.stringify(err.body) : err.body ?? "";
     return `Code:${code || "-"}  Msg:${msg || "-"}  Body:${body || "-"}`;
 }
 
 function logInfluxError(context, err) {
     console.error(`${context}  ${formatInfluxError(err)}\nStack:`, err.stack);
+}
+
+function buildTagString(dp, trigger) {
+    // Baue das Tag-Array (ohne leere Tags!)
+    const tagPairs = [
+        dp.tagSource ? `source=${escapeLP(dp.tagSource)}` : null,
+        dp.sensor_id ? `sensor=${escapeLP(dp.sensor_id)}` : null,
+        dp.location ? `location=${escapeLP(dp.location)}` : null,
+        dp.processing ? `processing=${escapeLP(dp.processing)}` : null,
+        trigger ? `trigger=${escapeLP(trigger)}` : null
+    ].filter(Boolean); // Filtert alle nicht-gesetzten Tags raus
+    return tagPairs.join(",");
 }
 
 // Maps: letzter Wert & letzter erfolgreicher Write (ms)
@@ -143,7 +156,17 @@ async function saveQueue() {
 }
 
 function enqueueValue(dp, value, source, ts) {
-    queue.push({ dp, value, source, ts });
+    queue.push({
+        id: dp.id,
+        measurement: dp.measurement,
+        tagSource: dp.tagSource,
+        sensor_id: dp.sensor_id,
+        location: dp.location,
+        processing: dp.processing,
+        value,
+        source,
+        ts
+    });
     saveQueue();
 }
 
@@ -157,19 +180,18 @@ async function flushQueue() {
     }
 
     const batch = queue.splice(0, MAX_BATCH);
-    const lines = batch.map(({ dp, value, source, ts }) => {
-        const meas = escapeLP(dp.measurement);
-        const tag = escapeLP(dp.tagSource || "iobroker_raspi");
-        const trig = escapeLP(source);
-        return `${meas},quelle=${tag},trigger=${trig} wert=${value} ${ts}`;
+    const lines = batch.map(q => {
+        const meas = escapeLP(q.measurement);
+        const tags = buildTagString(q, q.source);
+        return `${meas},${tags} value=${q.value} ${q.ts}`;
     });
 
     try {
         await client.write(lines.join("\n"));
         const now = Date.now();
-        for (const { dp, value } of batch) {
-            lastWritten.set(dp.id, now);
-            writtenValues.set(dp.id, value);
+        for (const q of batch) {
+            lastWritten.set(q.id, now);
+            writtenValues.set(q.id, q.value);
         }
         flushDelay = BASE_FLUSH_MS;
     } catch (err) {
@@ -196,9 +218,8 @@ async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
         return;
     }
     const meas = escapeLP(dp.measurement);
-    const tag = escapeLP(dp.tagSource || "iobroker_raspi");
-    const trig = escapeLP(source);
-    const line = `${meas},quelle=${tag},trigger=${trig} wert=${num} ${ts}`;
+    const tags = buildTagString(dp, source);
+    const line = `${meas},${tags} value=${num} ${ts}`;
 
     try {
         await client.write(line);
@@ -306,3 +327,14 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
         }
     });
 }
+
+// FATAL ERROR HANDLER
+process.on("unhandledRejection", async err => {
+    console.error("Unhandled rejection:", err);
+    try { await flushQueue(); } finally { process.exit(1); }
+});
+
+process.on("uncaughtException", async err => {
+    console.error("Fatal:", err);
+    try { await flushQueue(); } finally { process.exit(1); }
+});
