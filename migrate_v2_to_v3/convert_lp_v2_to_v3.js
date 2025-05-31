@@ -1,5 +1,5 @@
 // convert_lp.js
-// Aufruf:   node convert_lp.js [raw.lp] [export.lp]
+// Aufruf: node convert_lp.js [raw.lp] [export.lp]
 
 const fs = require('fs');
 const path = require('path');
@@ -9,36 +9,37 @@ const outFile = process.argv[3] || 'export.lp';
 
 function transformLine(line) {
     line = line.trim();
-    if (!line) return null;                   // Leere Zeile skippen
+    if (!line) return null;                              // Leerzeile
 
-    /*  ------  Zerlegen in prefix + timestamp  ------  */
+    /* --- prefix (measurement + fields)  +  timestamp ------------------- */
     const lastSp = line.lastIndexOf(' ');
-    if (lastSp === -1) return null;           // Ungültig
-    const ts = line.slice(lastSp + 1);             // 1746056…
-    const prefix = line.slice(0, lastSp);              // meas field=val
+    if (lastSp === -1) return null;                      // Ungültig
+    const ts = line.slice(lastSp + 1);
+    const prefix = line.slice(0, lastSp);
 
-    /*  ------  Zerlegen in measurement + fields  ------  */
+    /* --- measurement  +  fieldPart ------------------------------------- */
     const firstSp = prefix.indexOf(' ');
-    if (firstSp === -1) return null;          // kein Feldteil
-    const measFull = prefix.slice(0, firstSp);          // javascript.0.Wetterstation.Aussentemperatur
-    const fieldPart = prefix.slice(firstSp + 1);         // value=10.27
+    if (firstSp === -1) return null;                     // kein Feld
+    const measFull = prefix.slice(0, firstSp);
+    const fieldPart = prefix.slice(firstSp + 1);
 
-    /*  ------  Measurement kürzen  ------  */
-    const meas = measFull.split('.').pop();   // → Aussentemperatur
+    /* --- **Nur** Zeilen mit value= behalten ---------------------------- */
+    if (!fieldPart.startsWith('value=')) return null;    // alles andere verwerfen
 
-    /*  ------  Feldnamen umbenennen  ------  */
+    /* --- measurement kürzen ------------------------------------------- */
+    const meas = measFull.split('.').pop();              // Aussentemperatur
+
+    /* --- Feldnamen umbenennen + Line zurück --------------------------- */
     const fieldFixed = fieldPart.replace(/^value=/, 'wert=');
-
-    /*  ------  Tags ergänzen + line zurückgeben  ------  */
     return `${meas},quelle=influxdbv2,trigger=manual_import ${fieldFixed} ${ts}`;
 }
 
-/* -----------  Datei lesen, Zeilen transformieren  ----------- */
-const raw = fs.readFileSync(inFile, 'utf8')
+/* -------------------------------------------------------------------- */
+const lp = fs.readFileSync(inFile, 'utf8')
     .split('\n')
     .map(transformLine)
-    .filter(Boolean)              // ungültige/null-Zeilen raus
+    .filter(Boolean)              // nur gültige Zeilen
     .join('\n') + '\n';           // trailing newline
 
-fs.writeFileSync(outFile, raw, 'utf8');
-console.log(`✅  LP umgeschrieben → ${path.resolve(outFile)}`);
+fs.writeFileSync(outFile, lp, 'utf8');
+console.log(`✅  Nur value-Zeilen behalten → ${path.resolve(outFile)}`);
