@@ -18,7 +18,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@influxdata/influxdb3-client": "^1.1.0",
-    "dotenv": "^16.5.0"
+    "@influxdata/influxdb3-client": "^1.1.0"
   }
 }
