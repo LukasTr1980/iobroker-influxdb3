@@ -301,11 +301,6 @@ async function main() {
             }
             lastGuardRun.set(dp.id, now);
 
-            const lastSuccessfulWrite = lastWritten.get(dp.id) || 0;
-            if (now - lastSuccessfulWrite < ONE_HOUR) {
-                continue;
-            }
-
             let val = lastValues.get(dp.id);
             if (val === undefined) {
                 try {
@@ -319,7 +314,7 @@ async function main() {
             }
 
             if (val !== undefined) {
-                console.log(`Hourly Guard: Schreibe Wert für ${dp.id} (${val}), da >1h seit letztem erfolgreichem Write`);
+                console.log(`Hourly Guard: Schreibe Wert für ${dp.id} (${val}), da >1h seit dem letzten Mal, als der Guard für diesen Datenpunkt aktiv wurde`);
                 await writeToInflux(dp, val, "hourly-guard");
             } else {
                 console.warn(`Hourly Guard: Konnte keinen Wert für ${dp.id} finden, überspringe Write.`);
