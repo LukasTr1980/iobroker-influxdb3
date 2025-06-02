@@ -21,11 +21,21 @@ const path = require('path');
 const readline = require('readline');
 
 // ----------------------------------------------------------------------------
-// 1) Konfigurationsdatei einlesen (im selben Verzeichnis wie convert.js)
+// 1) Utility: Funktionen zum Escapen (Line Protocol Rules)
+//    – Measurement-Namen: Leerzeichen, Komma, Gleichheitszeichen mit Backslash escapen.
+//    – Tag-Werte: Leerzeichen → \ , Komma → \,  Gleichheitszeichen → \=
+// ----------------------------------------------------------------------------
+const Escape = {
+    lpMeasurement: (str) => str.replace(/([ ,=])/g, '\\$1'),
+    lpTagValue: (str) => str.replace(/([ ,=])/g, '\\$1')
+};
+
+// ----------------------------------------------------------------------------
+// 2) Konfigurationsdatei einlesen
 // ----------------------------------------------------------------------------
 let config;
 try {
-    const configPath = path.resolve(__dirname, 'config.json');
+    const configPath = path.resolve(__dirname, '../config.json');
     const configText = fs.readFileSync(configPath, 'utf8');
     config = JSON.parse(configText);
 } catch (err) {
@@ -34,7 +44,7 @@ try {
 }
 
 // ----------------------------------------------------------------------------
-// 2) Auf Duplikate in config.datapoints.measurement prüfen
+// 3) Auf Duplikate in config.datapoints.measurement prüfen
 // ----------------------------------------------------------------------------
 const allMeasurements = config.datapoints.map(dp => dp.measurement);
 const duplicates = allMeasurements.filter((m, i) => allMeasurements.indexOf(m) !== i);
@@ -47,7 +57,7 @@ if (duplicates.length) {
 }
 
 // ----------------------------------------------------------------------------
-// 3) Aus config.datapoints ein Lookup-Objekt dpMap erstellen
+// 4) Aus config.datapoints ein Lookup-Objekt dpMap erstellen
 //    Key   = IoBroker-ID (dp.id, z.B. "javascript.0.Wetterstation.Aussentemperatur")
 //    Value = Objekt mit:
 //              { measurement, tagsArray }
@@ -62,28 +72,28 @@ for (const dp of config.datapoints) {
         continue;
     }
 
-    // 2a) Measurement-Name escapen
+    // 4a) Measurement-Name escapen
     const escapedMeas = Escape.lpMeasurement(dp.measurement);
 
-    // 2b) Tags sammeln (Schlüssel außer "measurement" und "minDelta")
+    // 4b) Tags sammeln (Schlüssel außer "measurement" und "minDelta")
     const tagsArray = [];
     for (const key of Object.keys(dp)) {
         if (key === 'id' || key === 'measurement' || key === 'minDelta') continue;
         const val = dp[key];
         if (val === undefined || val === null || val === '') continue;
-        // key.js sollte keine Sonderzeichen enthalten, aber wir escapen val:
+        // key sollte keine Sonderzeichen enthalten, aber wir escapen den Wert:
         const escapedVal = Escape.lpTagValue(String(val));
         tagsArray.push(`${key}=${escapedVal}`);
     }
 
     dpMap[dp.id] = {
         measurement: escapedMeas, // bereits escaped
-        tagsArray   // array von "key=value" (vide escapings)
+        tagsArray                 // Array von "key=value"-Strings
     };
 }
 
 // ----------------------------------------------------------------------------
-// 4) CLI-Parser: Eingabe-/Ausgabedatei (Default: raw.lp → export.lp)
+// 5) CLI-Parser: Eingabe-/Ausgabedatei (Default: raw.lp → export.lp)
 // ----------------------------------------------------------------------------
 const argv = process.argv.slice(2);
 const inFile = argv[0] || 'raw.lp';
@@ -99,17 +109,6 @@ if (!fs.existsSync(inPath)) {
 }
 
 // ----------------------------------------------------------------------------
-// 5) Utility: Funktionen zum Escapen (Line Protocol Rules)
-//
-// – Measurement-Namen: Leerzeichen, Komma, Gleichheitszeichen mit Backslash escapen.
-// – Tag-Werte: Leerzeichen → \ , Komma → \,  Gleichheitszeichen → \=
-// ----------------------------------------------------------------------------
-const Escape = {
-    lpMeasurement: (str) => str.replace(/([ ,=])/g, '\\$1'),
-    lpTagValue: (str) => str.replace(/([ ,=])/g, '\\$1')
-};
-
-// ----------------------------------------------------------------------------
 // 6) transformLine: Verarbeitet eine einzelne LP-Zeile (String → String|null)
 // ----------------------------------------------------------------------------
 function transformLine(line) {
@@ -119,8 +118,8 @@ function transformLine(line) {
     // a) Timestamp abtrennen (alles rechts vom letzten Leerzeichen)
     const lastSpace = line.lastIndexOf(' ');
     if (lastSpace === -1) return null; // ungültige LP-Zeile
-    const ts = line.slice(lastSpace + 1); // Nanosekunden-Timestamp
-    const prefix = line.slice(0, lastSpace);  // z.B. "id,alteTags value=0.5"
+    const ts = line.slice(lastSpace + 1);  // Nanosekunden-Timestamp
+    const prefix = line.slice(0, lastSpace);   // z.B. "id,alteTags value=0.5"
 
     // b) prefix in prefixMain (Messungsname + alteTags) und fieldPart (z.B. "value=0.5") splitten
     const firstSpace = prefix.indexOf(' ');
@@ -145,16 +144,18 @@ function transformLine(line) {
     // g) Füge die zwei festen Global-Tags an (source=influxdbv2, trigger=manual_import)
     tagsList.push('source=influxdbv2', 'trigger=manual_import');
 
-    // h) Tag-String zusammensetzen (keine dedizierte Reihenfolge nötig)
+    // h) Tag-String zusammensetzen
+    //    Wenn tagsList leer ist, ergibt join("") eine leere Zeichenkette
     const tagsString = tagsList.join(',');
 
-    // i) Feldteil unverändert übernehmen (fieldPart z.B. "value=0.5")
-    //    Da wir nur numerische Werte erwarten, brauchen wir hier kein weiteres Escaping.
+    // i) Feldteil unverändert übernehmen (z.B. "value=0.5")
+    //    Für numerische Werte ist kein weiteres Escaping nötig.
     const fieldFixed = fieldPart;
 
     // j) Neue LP-Zeile:
     //    "<measurementEscaped>,tag1=val1,tag2=val2 value=... <timestamp>"
-    return `${newMeas},${tagsString ? ',' + tagsString : ''} ${fieldFixed} ${ts}`;
+    //    Wenn tagsString leer ist, entfernt man das führende Komma.
+    return `${newMeas}${tagsString ? ',' + tagsString : ''} ${fieldFixed} ${ts}`;
 }
 
 // ----------------------------------------------------------------------------
