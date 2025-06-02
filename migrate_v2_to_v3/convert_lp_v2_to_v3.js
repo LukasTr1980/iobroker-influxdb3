@@ -22,10 +22,10 @@ const outFile = process.argv[3] || 'export.lp';
 /**
  * transformLine(line)
  * - Trennt zuerst den Timestamp ab (am letzten Leerzeichen).
- * - Trennt dann den Messungsnamen (prefix vor dem ersten Leerzeichen) vom Feldteil (fieldPart).
- * - Wenn fieldPart nicht mit "value=" beginnt, wird null zurückgegeben (Zeile verworfen).
- * - Ersetzt "value=" durch "wert=" und baut eine neue LP-Zeile
- *   <measurementName>,<alleTags> wert=<Zahl> <Timestamp>
+ * - Trennt dann den Feldteil (fieldPart) ab, überprüft, ob er mit "value=" beginnt.
+ * - Lässt "value=" unverändert.
+ * - Baut eine neue LP-Zeile:
+ *     <measurementName>,<tags> <fieldPart> <ts>
  */
 function transformLine(line) {
     line = line.trim();
@@ -33,20 +33,20 @@ function transformLine(line) {
 
     // 1) Timestamp abtrennen (alles rechts vom letzten Leerzeichen)
     const lastSpace = line.lastIndexOf(' ');
-    if (lastSpace === -1) return null;  // keine gültige LP-Zeile
-    const ts = line.slice(lastSpace + 1); // Timestamp
-    const prefix = line.slice(0, lastSpace);  // z. B. "javascript.0.Wetterstation.Aussentemperatur value=0.5"
+    if (lastSpace === -1) return null;           // keine gültige LP-Zeile
+    const ts = line.slice(lastSpace + 1);     // Timestamp
+    const prefix = line.slice(0, lastSpace);      // z.B. "javascript.0.Wetterstation.Aussentemperatur value=0.5"
 
-    // 2) Messungs-ID (alles vor dem ersten Leerzeichen) und Feldteil (alles danach) abtrennen
+    // 2) Feldteil (alles nach dem ersten Leerzeichen im prefix) abtrennen
     const firstSpace = prefix.indexOf(' ');
-    if (firstSpace === -1) return null;      // kein Feldteil vorhanden
+    if (firstSpace === -1) return null;           // kein Feldteil vorhanden
     const fieldPart = prefix.slice(firstSpace + 1);
 
     // 3) Nur wenn das Feld mit "value=" beginnt, weiterverarbeiten
     if (!fieldPart.startsWith('value=')) return null;
 
-    // 4) "value=<Zahl>" → "value=<Zahl>"
-    const fieldFixed = fieldPart.replace(/^value=/, 'value=');
+    // 4) "value=<Zahl>" unverändert lassen
+    const fieldFixed = fieldPart;
 
     // 5) Feste Tags in der gewünschten Reihenfolge aneinanderhängen
     const tags = [
@@ -63,15 +63,16 @@ function transformLine(line) {
 }
 
 /* --------------------------------------------------------------------
-   Datei einlesen, Zeilen transformieren, nur gültige Zeilen behalten,
-   und in die Ausgabedatei schreiben.
+   Datei einlesen und jede Zeile transformieren
 ---------------------------------------------------------------------*/
-const lpOutput = fs
-    .readFileSync(inFile, 'utf8')
-    .split('\n')
-    .map(transformLine)
-    .filter(Boolean)         // nur nicht-null-Zeilen behalten
-    .join('\n') + '\n';
+const lines = fs.readFileSync(inFile, 'utf8').split('\n');
+const transformed = lines.map(transformLine).filter(Boolean);
 
+/* --------------------------------------------------------------------
+   Zähler ausgeben und Ergebnis in die Ausgabedatei schreiben
+---------------------------------------------------------------------*/
+const count = transformed.length;
+const lpOutput = transformed.join('\n') + '\n';
 fs.writeFileSync(outFile, lpOutput, 'utf8');
-console.log(`✅  Nur value-Zeilen umgewandelt → ${path.resolve(outFile)}`);
+
+console.log(`✅  Nur ${count} value-Zeilen umgewandelt → ${path.resolve(outFile)}`);
