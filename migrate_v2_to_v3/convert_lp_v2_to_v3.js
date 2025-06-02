@@ -75,10 +75,10 @@ for (const dp of config.datapoints) {
     // 4a) Measurement-Name escapen
     const escapedMeas = Escape.lpMeasurement(dp.measurement);
 
-    // 4b) Tags sammeln (Schlüssel außer "measurement" und "minDelta")
+    // 4b) Tags sammeln (Schlüssel außer "id", "measurement", "minDelta" und "source")
     const tagsArray = [];
     for (const key of Object.keys(dp)) {
-        if (key === 'id' || key === 'measurement' || key === 'minDelta') continue;
+        if (key === 'id' || key === 'measurement' || key === 'minDelta' || key === 'source') continue;
         const val = dp[key];
         if (val === undefined || val === null || val === '') continue;
         // key sollte keine Sonderzeichen enthalten, aber wir escapen den Wert:
