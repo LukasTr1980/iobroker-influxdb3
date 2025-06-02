@@ -96,7 +96,7 @@ function buildTagString(dp, trigger) {
     // Baue das Tag-Array (ohne leere Tags!)
     const tagPairs = [
         dp.tagSource ? `source=${escapeLP(dp.tagSource)}` : null,
-        dp.sensor_id ? `sensor=${escapeLP(dp.sensor_id)}` : null,
+        dp.sensor_id ? `sensor_id=${escapeLP(dp.sensor_id)}` : null,
         dp.location ? `location=${escapeLP(dp.location)}` : null,
         dp.processing ? `processing=${escapeLP(dp.processing)}` : null,
         trigger ? `trigger=${escapeLP(trigger)}` : null
