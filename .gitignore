@@ -4,3 +4,4 @@ config.json
 *.lp
 node_modules/
 .env
+*.txt
