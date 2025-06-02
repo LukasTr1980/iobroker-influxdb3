@@ -54,8 +54,8 @@ let client; // wird erst in main() initialisiert
             die(`Ungültiger oder fehlender 'id': ${JSON.stringify(dp)}`);
         if (!dp.measurement || typeof dp.measurement !== "string")
             die(`Ungültiges oder fehlendes 'measurement' für ${dp.id}`);
-        if (dp.tagSource !== undefined && typeof dp.tagSource !== "string")
-            die(`'tagSource' für ${dp.id} muss String sein.`);
+        if (dp.source !== undefined && typeof dp.source !== "string")
+            die(`'source' für ${dp.id} muss String sein.`);
         // NEU ➟ minDelta ist optional, muss aber ≥ 0 sein
         if (dp.minDelta !== undefined &&
             (typeof dp.minDelta !== "number" || dp.minDelta < 0))
@@ -95,7 +95,7 @@ function logInfluxError(context, err) {
 function buildTagString(dp, trigger) {
     // Baue das Tag-Array (ohne leere Tags!)
     const tagPairs = [
-        dp.tagSource ? `source=${escapeLP(dp.tagSource)}` : null,
+        dp.source ? `source=${escapeLP(dp.source)}` : null,
         dp.sensor_id ? `sensor_id=${escapeLP(dp.sensor_id)}` : null,
         dp.location ? `location=${escapeLP(dp.location)}` : null,
         dp.processing ? `processing=${escapeLP(dp.processing)}` : null,
@@ -155,16 +155,16 @@ async function saveQueue() {
     }
 }
 
-function enqueueValue(dp, value, source, ts) {
+function enqueueValue(dp, value, trigger, ts) {
     queue.push({
         id: dp.id,
         measurement: dp.measurement,
-        tagSource: dp.tagSource,
+        source: dp.source,
         sensor_id: dp.sensor_id,
         location: dp.location,
         processing: dp.processing,
         value,
-        source,
+        trigger,
         ts
     });
     saveQueue();
@@ -182,7 +182,7 @@ async function flushQueue() {
     const batch = queue.splice(0, MAX_BATCH);
     const lines = batch.map(q => {
         const meas = escapeLP(q.measurement);
-        const tags = buildTagString(q, q.source);
+        const tags = buildTagString(q, q.trigger);
         return `${meas},${tags} value=${q.value} ${q.ts}`;
     });
 
@@ -211,14 +211,14 @@ function scheduleNextFlush() {
 // --------------------------------------------------
 // Schreiben einzelner Werte (mit Typ‑Check & Escaping)
 // --------------------------------------------------
-async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
+async function writeToInflux(dp, rawVal, trigger, ts = msToNs(Date.now())) {
     const num = Number(rawVal);
     if (!Number.isFinite(num)) {
         console.warn(`Ungültiger Wert (${rawVal}) für ${dp.measurement}`);
         return;
     }
     const meas = escapeLP(dp.measurement);
-    const tags = buildTagString(dp, source);
+    const tags = buildTagString(dp, trigger);
     const line = `${meas},${tags} value=${num} ${ts}`;
 
     try {
@@ -227,8 +227,8 @@ async function writeToInflux(dp, rawVal, source, ts = msToNs(Date.now())) {
         lastWritten.set(dp.id, now);
         writtenValues.set(dp.id, num);
     } catch (err) {
-        logInfluxError(`Write-Error ${dp.measurement} (${source}):`, err);
-        enqueueValue(dp, num, source, ts);
+        logInfluxError(`Write-Error ${dp.measurement} (${trigger}):`, err);
+        enqueueValue(dp, num, trigger, ts);
     }
 }
 
