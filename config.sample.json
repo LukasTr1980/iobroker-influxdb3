@@ -1,0 +1,35 @@
+{
+    "influx": {
+        "host": "INFLUXDB3_HOST:PORT",
+        "token": "YOUR_DATABASE_TOKEN",
+        "database": "YOUR_DATABASE"
+    },
+    "datapoints": [
+        {
+            "id": "IOBROKER_ID",
+            "sensor_id": "SENSOR_ID",
+            "measurement": "TABLE_NAME",
+            "source": "DATENQUELLE",
+            "location": "INSTALLATIONSORT",
+            "processing": "BERECHNET ODER RAW"
+        },
+        {
+            "id": "IOBROKER_ID",
+            "sensor_id": "SENSOR_ID",
+            "measurement": "TABLE_NAME",
+            "source": "DATENQUELLE",
+            "location": "INSTALLATIONSORT",
+            "processing": "BERECHNET ODER RAW",
+            "minDelta": 0.1,
+            "$comment": "minDelta IST OPTIONAL, MINIMALE SCHWELLE FÜR WERTÄNDERUNG"
+        },
+        {
+            "id": "etc...",
+            "sensor_id": "etc...",
+            "measurement": "etc...",
+            "source": "etc...",
+            "location": "etc...",
+            "processing": "etc..."
+        }
+    ]
+}
