@@ -9,7 +9,6 @@ Ein JavaScript‑Connector für **InfluxDB 3.0** sowie ein Konverter, der Daten
 * [Installation](#installation)
 * [Verwendung](#verwendung)
 * [Migration 2.x → 3.x](#migration-2x-→-3x)
-* [Lizenz](#lizenz)
 
 ---
 
@@ -19,6 +18,13 @@ Dieser Connector schreibt ioBroker‑Daten (Zustände, Logs, Metriken) direkt in
 Das Repository enthält außerdem ein Skript zur Migration bestehender InfluxDB‑2.x‑Datenbanken.
 
 * **Connector**: Echtzeit‑Write von ioBroker ➜ InfluxDB 3.0
+* **Features**:
+  * Zustände, Logs, Metriken
+  * Konfiguration über JSON
+  * Unterstützung für InfluxDB 3.x
+  * Schreibt Werte nur bei Änderungen
+  * Schreibt Werte nur wenn minDelta überschritten wird, konfigurierbar in der config.json
+  * Schreibt Werte immer einmal pro Stunde, egal ob Änderungen oder nicht (nützlich für Grafana)
 * **Konverter**: Vollständige Daten‑ & Metadatenübernahme von 2.x‑Buckets ➜ 3.x‑Buckets
 
 ---
@@ -46,11 +52,12 @@ sudo git clone https://github.com/LukasTr1980/iobroker-influxdb3.git .
 #  - oder: Dateien manuell hierher kopieren
 
 # 4. Abhängigkeiten installieren
-sudo npm install
+In iobroker -> Instanzen -> Javascript‑Adapter -> Einstellungen zusätzliche NPM-Module installieren: @influxdata/influxdb3-client
 
 # 5. Konfig kopieren/erstellen
 ACHTUNG: Die Konfigurationsdatei `config.sample.json` öffnen und genau anpassen!
 
+# 6. Anschließend Konfigurationsdatei umbenennen
 mv config.sample.json ./config.json
 ```
 
@@ -62,6 +69,8 @@ Den Code in den Javascript‑Adapter von ioBroker einfügen und starten.
 
 ---
 
+## OPTIONAL UND NUR MIT BACKUP VON INFLUXDB 2.x!
+**Aktuell eingeschränkt und experimentell**
 ## Migration 2.x → 3.x
 
 Measurements von InfluxDB 2.x exportieren mittels dieses Strings:
@@ -85,9 +94,3 @@ node influxdb3_client.js
 ```
 
 4. Nach Abschluss Konsistenz prüfen (Influx UI/CLI).
-
----
-
-## Lizenz
-
-[MIT License](LICENSE)
