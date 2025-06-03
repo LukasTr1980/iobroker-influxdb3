@@ -1,60 +1,42 @@
 #!/usr/bin/env node
 /**
- * Importiert Line‑Protocol‑Dateien (LP / LP.GZ) in InfluxDB 3.0.
+ * Gedrosselter LP-Importer für InfluxDB 3.0
+ *  • Batching, begrenzte Parallelität
+ *  • optionale Pausen + Retry-Backoff
  *
- * ● Verbindungseinstellungen werden zuerst aus Umgebungsvariablen gelesen
- *   (INFLUXDB3_HOST, INFLUXDB3_TOKEN, INFLUXDB3_DATABASE).
- * ● Falls nicht gesetzt, werden die Werte aus `config.json` verwendet.
- *   Standard‑Pfad:  <SCRIPT‑VERZEICHNIS>/config.json
- *   → kann via   --config <pfad>   oder   ENV CONFIG_PATH   überschrieben werden.
- *
- * Aufrufbeispiel:
- *    node influxdb3_client.js export.lp
- *    node influxdb3_client.js export.lp --config /pfad/zu/config.json
+ * Flags / ENV:
+ *   --batch 2000        (BATCH_SIZE)     |  export BATCH_SIZE=2000
+ *   --conc  2           (CONCURRENCY)    |  export CONCURRENCY=2
+ *   --pause 200         (THROTTLE_MS)    |  export THROTTLE_MS=200
  */
 
-import fs from 'fs';
-import zlib from 'zlib';
-import readline from 'readline';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { InfluxDBClient } from '@influxdata/influxdb3-client';
+const fs = require('fs');
+const zlib = require('zlib');
+const readline = require('readline');
+const path = require('path');
+const cliProg = require('cli-progress');
+const { InfluxDBClient } = require('@influxdata/influxdb3-client');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-/**
- * Lädt und parst eine JSON‑Konfigurationsdatei.
- * Priorität:
- *   1. CLI‑Argument  --config <pfad>
- *   2. ENV‑Variable  CONFIG_PATH
- *   3. Standard:     <SCRIPT‑DIR>/config.json
- */
-function loadConfig() {
-    // --config <path>
-    const cliIndex = process.argv.indexOf('--config');
-    let cfgPath = cliIndex !== -1 ? process.argv[cliIndex + 1] : process.env.CONFIG_PATH;
-    if (!cfgPath) {
-        cfgPath = path.join(__dirname, '../config.json');
-    }
-
-    if (!fs.existsSync(cfgPath)) {
-        console.warn(`⚠️  Keine config.json gefunden unter ${cfgPath} – es werden ausschließlich ENV‑Variablen verwendet.`);
-        return {};
-    }
-
-    try {
-        return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    } catch (e) {
-        console.error(`❌  Fehler beim Parsen der config.json (${cfgPath}):`, e.message);
-        process.exit(1);
-    }
+/* ───── Runtime-Parameter (mit Defaults) ───────────────────────────────── */
+function argOrEnv(flag, env, def) {
+    const idx = process.argv.indexOf(`--${flag}`);
+    return idx !== -1 ? +process.argv[idx + 1] : +(process.env[env] || def);
 }
+const BATCH_SIZE = argOrEnv('batch', 'BATCH_SIZE', 5000);
+const CONCURRENCY = argOrEnv('conc', 'CONCURRENCY', 1);
+const THROTTLE_MS = argOrEnv('pause', 'THROTTLE_MS', 300);   // 0 = aus
+const RETRIES = argOrEnv('retry', 'RETRIES', 3);     // pro Batch
 
-const cfg = loadConfig();
-const influxCfg = cfg.influx || {};
+/* ───── Config / Client ───────────────────────────────────────────────── */
+function loadConfig() {
+    const i = process.argv.indexOf('--config');
+    let p = i !== -1 ? process.argv[i + 1] : process.env.CONFIG_PATH;
+    if (!p) p = path.join(__dirname, '../config.json');
+    return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {};
+}
+const cfg = loadConfig() ?? {};
+const influxCfg = cfg.influx ?? {};
 
-// Verbindung zu InfluxDB 3 herstellen (ENV > config.json > Fallback)
 const client = new InfluxDBClient({
     host: process.env.INFLUXDB3_HOST || influxCfg.host || 'http://localhost:8181',
     token: process.env.INFLUXDB3_TOKEN || influxCfg.token || '',
@@ -62,37 +44,69 @@ const client = new InfluxDBClient({
     timeout: influxCfg.timeout ?? 180_000
 });
 
-async function importLineByLine(lpFile) {
-    let written = 0;
+/* ───── kleine Helfer ─────────────────────────────────────────────────── */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function writeWithRetry(lines) {
+    let attempt = 0;
+    while (true) {
+        try { return await client.write(lines); }
+        catch (e) {
+            if (++attempt > RETRIES) throw e;
+            const wait = 300 * attempt;                // linearer Backoff
+            console.warn(`⚠️  Retry ${attempt}/${RETRIES} in ${wait} ms – ${e.message}`);
+            await sleep(wait);
+        }
+    }
+}
 
-    const input = lpFile.endsWith('.gz')
-        ? fs.createReadStream(lpFile).pipe(zlib.createGunzip())
-        : fs.createReadStream(lpFile);
+/* ───── Import­routine ────────────────────────────────────────────────── */
+async function importFile(lpFile) {
+    const totalBytes = fs.statSync(lpFile).size;
+    const bar = new cliProg.SingleBar({
+        format: 'Fortschritt |{bar}| {percentage}% | {value}/{total} B | Zeilen: {lines}',
+        hideCursor: true
+    }, cliProg.Presets.shades_classic);
+    bar.start(totalBytes, 0, { lines: 0 });
+
+    let bytesRead = 0, written = 0, buffer = [];
+    const active = new Set();
+
+    const fileStream = fs.createReadStream(lpFile);
+    const input = lpFile.endsWith('.gz') ? fileStream.pipe(zlib.createGunzip()) : fileStream;
+
+    fileStream.on('data', c => { bytesRead += c.length; bar.update(bytesRead, { lines: written }); });
 
     const rl = readline.createInterface({ input, crlfDelay: Infinity });
 
+    const send = async () => {
+        if (!buffer.length) return;
+        const batch = buffer; buffer = [];
+        const task = writeWithRetry(batch)
+            .then(() => { written += batch.length; bar.update(bytesRead, { lines: written }); })
+            .catch(e => { bar.stop(); console.error('❌  Unrecoverable:', e.message); process.exit(1); })
+            .finally(() => active.delete(task));
+        active.add(task);
+
+        if (THROTTLE_MS) await sleep(THROTTLE_MS);
+        if (active.size >= CONCURRENCY) await Promise.race(active);
+    };
+
     for await (const line of rl) {
         if (!line.trim()) continue;
-        try {
-            await client.write([line]); // jede LP‑Zeile einzeln schreiben
-            written++;
-            if (written % 1000 === 0) console.log(`→ ${written} Zeilen geschrieben …`);
-        } catch (err) {
-            console.error('❌  Fehler beim Schreiben:', err.body || err.message || err);
-            process.exit(1);
-        }
+        buffer.push(line);
+        if (buffer.length >= BATCH_SIZE) await send();
     }
+    await send();                  // Rest
+    await Promise.all(active);     // offene Writes beenden
 
-    console.log(`✅  Import abgeschlossen – insgesamt ${written} Zeilen.`);
-    await client.close?.();
+    bar.update(totalBytes, { lines: written }); bar.stop();
+    console.log(`\n✅  Fertig – ${written} Zeilen.`); await client.close?.();
 }
 
+/* ───── CLI-Entry ─────────────────────────────────────────────────────── */
 (async () => {
     const lpFile = process.argv[2] || 'export.lp';
-    if (!fs.existsSync(lpFile)) {
-        console.error(`❌  Datei nicht gefunden: ${lpFile}`);
-        process.exit(1);
-    }
-    console.log(`→ Starte Import für ${lpFile}`);
-    await importLineByLine(lpFile);
+    if (!fs.existsSync(lpFile)) { console.error(`❌  Datei nicht gefunden: ${lpFile}`); process.exit(1); }
+    console.log(`→ Import startet (Batch=${BATCH_SIZE}, Conc=${CONCURRENCY}, Pause=${THROTTLE_MS} ms)\n`);
+    await importFile(lpFile);
 })();
