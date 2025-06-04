@@ -4,10 +4,10 @@
  *  • Batching, begrenzte Parallelität
  *  • optionale Pausen + Retry-Backoff
  *
- * Flags / ENV:
- *   --batch 2000        (BATCH_SIZE)     |  export BATCH_SIZE=2000
- *   --conc  2           (CONCURRENCY)    |  export CONCURRENCY=2
- *   --pause 200         (THROTTLE_MS)    |  export THROTTLE_MS=200
+ * Sichere Flags / ENV:
+ *   --batch 1000        (BATCH_SIZE)     |  export BATCH_SIZE=1000
+ *   --conc  1           (CONCURRENCY)    |  export CONCURRENCY=1
+ *   --pause 1000         (THROTTLE_MS)    |  export THROTTLE_MS=1000
  */
 
 const fs = require('fs');
@@ -22,9 +22,9 @@ function argOrEnv(flag, env, def) {
     const idx = process.argv.indexOf(`--${flag}`);
     return idx !== -1 ? +process.argv[idx + 1] : +(process.env[env] || def);
 }
-const BATCH_SIZE = argOrEnv('batch', 'BATCH_SIZE', 1000);
-const CONCURRENCY = argOrEnv('conc', 'CONCURRENCY', 1);
-const THROTTLE_MS = argOrEnv('pause', 'THROTTLE_MS', 300);   // 0 = aus
+const BATCH_SIZE = argOrEnv('batch', 'BATCH_SIZE', 2000); // max. Zeilen pro Batch
+const CONCURRENCY = argOrEnv('conc', 'CONCURRENCY', 2); // max. gleichzeitige Writes
+const THROTTLE_MS = argOrEnv('pause', 'THROTTLE_MS', 1000);   // 0 = aus
 const RETRIES = argOrEnv('retry', 'RETRIES', 3);     // pro Batch
 
 /* ───── Config / Client ───────────────────────────────────────────────── */
