@@ -115,10 +115,20 @@ async function importFile(lpFile) {
     console.log(`\n✅  Fertig – ${written} Zeilen.`); await client.close?.();
 }
 
+/* ───── Exports ────────────────────────────────────────────────── */
+
+module.exports = {
+    writeWithRetry,
+    importFile,
+    sleep
+};
+
 /* ───── CLI-Entry ─────────────────────────────────────────────────────── */
-(async () => {
-    const lpFile = process.argv[2] || 'export.lp';
-    if (!fs.existsSync(lpFile)) { console.error(`❌  Datei nicht gefunden: ${lpFile}`); process.exit(1); }
-    console.log(`→ Import startet (Batch=${BATCH_SIZE}, Conc=${CONCURRENCY}, Pause=${THROTTLE_MS} ms)\n`);
-    await importFile(lpFile);
-})();
+if (require.main === module) {
+    (async () => {
+        const lpFile = process.argv[2] || 'export.lp';
+        if (!fs.existsSync(lpFile)) { console.error(`❌  Datei nicht gefunden: ${lpFile}`); process.exit(1); }
+        console.log(`→ Import startet (Batch=${BATCH_SIZE}, Conc=${CONCURRENCY}, Pause=${THROTTLE_MS} ms)\n`);
+        await importFile(lpFile);
+    })();
+}
