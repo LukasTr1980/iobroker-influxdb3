@@ -22,7 +22,7 @@ function argOrEnv(flag, env, def) {
     const idx = process.argv.indexOf(`--${flag}`);
     return idx !== -1 ? +process.argv[idx + 1] : +(process.env[env] || def);
 }
-const BATCH_SIZE = argOrEnv('batch', 'BATCH_SIZE', 2000); // max. Zeilen pro Batch
+const BATCH_SIZE = argOrEnv('batch', 'BATCH_SIZE', 10000); // max. Zeilen pro Batch
 const CONCURRENCY = argOrEnv('conc', 'CONCURRENCY', 2); // max. gleichzeitige Writes
 const THROTTLE_MS = argOrEnv('pause', 'THROTTLE_MS', 1000);   // 0 = aus
 const RETRIES = argOrEnv('retry', 'RETRIES', 3);     // pro Batch
