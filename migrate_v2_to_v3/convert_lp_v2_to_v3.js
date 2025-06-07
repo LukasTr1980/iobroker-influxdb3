@@ -125,6 +125,10 @@ if (!fs.existsSync(inPath)) {
     process.exit(1);
 }
 
+// Dateigröße des Eingabefiles in MB ausgeben
+const inFileSizeMB = (fs.statSync(inPath).size / (1024 * 1024)).toFixed(2);
+console.log(`ℹ️  ${inPath} hat eine Größe von ${inFileSizeMB} MB`);
+
 // ----------------------------------------------------------------------------
 // 6) transformLine: Verarbeitet eine einzelne LP-Zeile (String → String|null)
 // ----------------------------------------------------------------------------
@@ -199,5 +203,7 @@ function transformLine(line) {
 
     writer.end(() => {
         console.log(`✅ ${count} value-Zeilen umgewandelt → ${outPath}`);
+        const outFileSizeMB = (fs.statSync(outPath).size / (1024 * 1024)).toFixed(2);
+        console.log(`ℹ️  ${outPath} hat eine Größe von ${outFileSizeMB} MB`);
     });
 })();
