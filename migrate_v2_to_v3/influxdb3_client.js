@@ -130,5 +130,8 @@ if (require.main === module) {
         if (!fs.existsSync(lpFile)) { console.error(`❌  Datei nicht gefunden: ${lpFile}`); process.exit(1); }
         console.log(`→ Import startet (Batch=${BATCH_SIZE}, Conc=${CONCURRENCY}, Pause=${THROTTLE_MS} ms)\n`);
         await importFile(lpFile);
-    })();
+    })().catch(err => {
+        console.error(`\n❌ Ein unerwarteter Fehler ist aufgetreten:`, err.message);
+        process.exit(1);
+    });
 }
