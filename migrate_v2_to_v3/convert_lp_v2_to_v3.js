@@ -21,6 +21,23 @@ const path = require('path');
 const readline = require('readline');
 
 // ----------------------------------------------------------------------------
+// Utility: Zählt die Zeilen einer Datei (\n-Separator)
+// ----------------------------------------------------------------------------
+function countLines(filePath) {
+    return new Promise((resolve, reject) => {
+        let lines = 0;
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => {
+            for (let i = 0; i < chunk.length; i++) {
+                if (chunk[i] === 10) lines++; // 10 => '\n'
+            }
+        });
+        stream.on('error', reject);
+        stream.on('end', () => resolve(lines));
+    });
+}
+
+// ----------------------------------------------------------------------------
 // 1) Utility: Funktionen zum Escapen (Line Protocol Rules)
 //    – Measurement-Namen: Leerzeichen, Komma, Gleichheitszeichen mit Backslash escapen.
 //    – Tag-Werte: Leerzeichen → \ , Komma → \,  Gleichheitszeichen → \=
@@ -162,6 +179,9 @@ function transformLine(line) {
 // 7) Streaming: Zeilenweise Einlesen mit readline, Ergebnis direkt in einen Write-Stream schreiben
 // ----------------------------------------------------------------------------
 (async () => {
+    const totalLines = await countLines(inPath);
+    console.log(`ℹ️  ${totalLines} Zeilen in ${inPath} gefunden.`);
+
     const reader = readline.createInterface({
         input: fs.createReadStream(inPath, { encoding: 'utf8' }),
         crlfDelay: Infinity
