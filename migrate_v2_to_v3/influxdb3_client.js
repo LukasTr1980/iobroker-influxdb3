@@ -3,6 +3,7 @@
  * Gedrosselter LP-Importer für InfluxDB 3.0
  *  • Batching, begrenzte Parallelität
  *  • optionale Pausen + Retry-Backoff
+ *  • erkennt 524-Timeouts bei der Snapshot-Persistierung und wartet 5 Minuten
  *
  * Sichere Flags / ENV:
  *   --batch 1000        (BATCH_SIZE)     |  export BATCH_SIZE=1000
@@ -46,13 +47,24 @@ const client = new InfluxDBClient({
 
 /* ───── kleine Helfer ─────────────────────────────────────────────────── */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Write LP lines with retry logic.
+// - 524 (Influx snapshot persistence) leads to a 5 minute wait WITHOUT
+//   consuming a retry attempt.
+// - Other errors use exponential backoff and count towards the retry limit.
 async function writeWithRetry(lines) {
     let attempt = 0;
     while (true) {
         try { return await client.write(lines); }
         catch (e) {
+            if (e.statusCode === 524 || String(e.message).includes('524')) {
+                console.warn('⚠️  Snapshot is persisting; retrying in 5 minutes…');
+                await sleep(300_000);      // wait without counting as a retry
+                continue;
+            }
+
             if (++attempt > RETRIES) throw e;
-            const wait = 300 * attempt;                // linearer Backoff
+            const wait = 300 * 2 ** (attempt - 1);   // exponential backoff
             console.warn(`⚠️  Retry ${attempt}/${RETRIES} in ${wait} ms – ${e.message}`);
             await sleep(wait);
         }
